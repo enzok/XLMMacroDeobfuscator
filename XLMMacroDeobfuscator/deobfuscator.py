@@ -262,6 +262,29 @@ class XLMInterpreter:
                     return_val = workspace_param
                     status = EvalStatus.FullEvaluation
                     next_cell = None
+        elif method_name == "GET.CELL":
+            arg_next_cell, arg_status, arg_return_val, arg_text = self.evaluate_parse_tree(current_cell,
+                                                                                           arguments[0],
+                                                                                           interactive)
+            sheet_name, col, row = self.get_cell_addr(current_cell, arguments[1])
+            cell = self.get_cell(sheet_name, col, row)
+
+            if str(arg_return_val) == "8":
+                pass
+            elif str(arg_return_val) == "17":
+                if row in current_cell.sheet.row_heights:
+                    text = return_val = current_cell.sheet.row_heights[row]
+                else:
+                    text = return_val = current_cell.sheet.row_height_default
+                status = EvalStatus.FullEvaluation
+            elif str(arg_return_val) == "19":
+                pass
+            elif str(arg_return_val) == "24":
+                pass
+            elif str(arg_return_val) == "38":
+                pass
+            elif str(arg_return_val) == "50":
+                pass
         elif method_name == "END.IF":
             self._indent_level -= 1
             self._indent_current_line = True
@@ -269,7 +292,6 @@ class XLMInterpreter:
         elif method_name == "FORMULA.FILL":
             next_cell, status, return_val, text = self.evaluate_formula(current_cell, method_name, arguments,
                                                                         interactive)
-
         if text is None:
             text = self.convert_parse_tree_to_str(parse_tree_root)
         return next_cell, status, return_val, text
@@ -836,7 +858,7 @@ def process_file(**kwargs):
 def main():
 
     arg_parser = argparse.ArgumentParser()
-    
+
     arg_parser.add_argument("-f", "--file", type=str, action='store', help="The path of a XLSM file")
     arg_parser.add_argument("-n", "--noninteractive", default=False, action='store_true',
                             help="Disable interactive shell")
