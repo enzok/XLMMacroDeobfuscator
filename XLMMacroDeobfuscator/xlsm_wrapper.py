@@ -136,8 +136,6 @@ class XLSMWrapper(ExcelWrapper):
         for row in rows:
             macrosheet.row_heights[row.attrib['r']] = row.attrib['ht']
 
-
-
     def get_defined_name(self, name, full_match=True):
         result = []
         name = name.lower()

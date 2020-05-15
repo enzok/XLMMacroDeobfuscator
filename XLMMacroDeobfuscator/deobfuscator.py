@@ -1,16 +1,18 @@
 import argparse
 import os
 import sys
-from lark import Lark
+from lark.lark import Lark
 from lark.exceptions import ParseError
 from lark.lexer import Token
 from lark.tree import Tree
 from XLMMacroDeobfuscator.excel_wrapper import XlApplicationInternational
 from XLMMacroDeobfuscator.xlsm_wrapper import XLSMWrapper
+
 try:
     from XLMMacroDeobfuscator.xls_wrapper import XLSWrapper
+
     HAS_XLSWrapper = True
-except:
+except Exception as e:
     HAS_XLSWrapper = False
     print("Excel is not present")
 from XLMMacroDeobfuscator.xls_wrapper_2 import XLSWrapper2
@@ -124,7 +126,7 @@ class XLMInterpreter:
 
             if cell.data == 'a1_notation_cell':
                 if len(cell.children) == 2:
-                    cell_addr = "'{}'!{}".format(cell.children[0],cell.children[1])
+                    cell_addr = "'{}'!{}".format(cell.children[0], cell.children[1])
                 else:
                     cell_addr = cell.children[0]
                 res_sheet, res_col, res_row = Cell.parse_cell_addr(cell_addr)
@@ -194,11 +196,11 @@ class XLMInterpreter:
         if len(self._workspace_defauls) == 0:
             script_dir = os.path.dirname(__file__)
             config_dir = os.path.join(script_dir, 'configs')
-            with open(os.path.join(config_dir,'get_workspace.conf'), 'r', encoding='utf_8') as workspace_conf_file:
+            with open(os.path.join(config_dir, 'get_workspace.conf'), 'r', encoding='utf_8') as workspace_conf_file:
                 for index, line in enumerate(workspace_conf_file):
                     line = line.strip()
                     if len(line) > 0:
-                        self._workspace_defauls[index+1] = line
+                        self._workspace_defauls[index + 1] = line
 
         if number in self._workspace_defauls:
             result = self._workspace_defauls[number]
@@ -215,8 +217,8 @@ class XLMInterpreter:
                 self.set_cell(dst_sheet, dst_col, dst_row, text)
 
         text = "{}({},{})".format(name,
-                                   '"{}"'.format(text.replace('"', '""')),
-                                   '{}!{}{}'.format(dst_sheet, dst_col, dst_row))
+                                  '"{}"'.format(text.replace('"', '""')),
+                                  '{}!{}{}'.format(dst_sheet, dst_col, dst_row))
         return_val = 0
         return next_cell, status, return_val, text
 
@@ -229,7 +231,7 @@ class XLMInterpreter:
                       parse_tree_root.children[2]
 
         arguments = []
-        for i in  parse_tree_root.children[4].children:
+        for i in parse_tree_root.children[4].children:
             if type(i) is not Token:
                 if len(i.children) > 0:
                     arguments.append(i.children[0])
@@ -250,7 +252,7 @@ class XLMInterpreter:
                     status = EvalStatus.Error
         elif method_name == "GET.WORKSPACE":
             status = EvalStatus.Error
-            if len(arguments)== 1:
+            if len(arguments) == 1:
                 arg_next_cell, arg_status, arg_return_val, arg_text = self.evaluate_parse_tree(current_cell,
                                                                                                arguments[0],
                                                                                                interactive)
@@ -267,24 +269,43 @@ class XLMInterpreter:
                                                                                            arguments[0],
                                                                                            interactive)
             sheet_name, col, row = self.get_cell_addr(current_cell, arguments[1])
-            cell = self.get_cell(sheet_name, col, row)
-
-            if str(arg_return_val) == "8":
+            row = int(row) - 1
+            res_col = Cell.convert_to_column_index(col) - 1
+            try:
+                cell_idx = current_cell.sheet.cell_xf_index(row, res_col)
+                cell_xf = current_cell.sheet.xf_list[cell_idx]
+                cell_font = current_cell.sheet.font_list[cell_xf.font_index]
+            except Exception as e:
                 pass
-            elif str(arg_return_val) == "17":
+            argval = arg_return_val.split(".")
+
+            if argval[0] == "8":
+                # horizontal alignment
+                text = return_val = cell_xf.alignment.hor_align
+                status = EvalStatus.FullEvaluation
+            elif argval[0] == "17":
+                # cell row height in points
                 if row in current_cell.sheet.row_heights:
                     text = return_val = current_cell.sheet.row_heights[row]
                 else:
                     text = return_val = current_cell.sheet.row_height_default
                 status = EvalStatus.FullEvaluation
-            elif str(arg_return_val) == "19":
-                pass
-            elif str(arg_return_val) == "24":
-                pass
-            elif str(arg_return_val) == "38":
-                pass
-            elif str(arg_return_val) == "50":
-                pass
+            elif argval[0] == "19":
+                # font height in points
+                text = return_val = cell_font.height / 20
+                status = EvalStatus.FullEvaluation
+            elif argval[0] == "24":
+                # font color (unsure if the correct attribute)
+                text = return_val = cell_font.colour_index
+                status = EvalStatus.FullEvaluation
+            elif argval[0] == "38":
+                # shade foreground color (very unsure of the correct attribute)
+                text = return_val = cell_font.colour_index
+                status = EvalStatus.FullEvaluation
+            elif argval[0] == "50":
+                # cell's vertical alignment
+                text = return_val = cell_xf.alignment.vert_align
+                status = EvalStatus.FullEvaluation
         elif method_name == "END.IF":
             self._indent_level -= 1
             self._indent_current_line = True
@@ -292,6 +313,13 @@ class XLMInterpreter:
         elif method_name == "FORMULA.FILL":
             next_cell, status, return_val, text = self.evaluate_formula(current_cell, method_name, arguments,
                                                                         interactive)
+        elif method_name == "SET.VALUE":
+            dst_sheet, dst_col, dst_row = self.get_cell_addr(current_cell, arguments[0])
+            next_cell, status, return_val, text = self.evaluate_parse_tree(current_cell, arguments[1], interactive)
+            if status == EvalStatus.FullEvaluation:
+                self.set_cell(dst_sheet, dst_col, dst_row, text)
+            text = "SET.VALUE({}{}, {})".format(dst_col, dst_row, text)
+            status = EvalStatus.FullEvaluation
         if text is None:
             text = self.convert_parse_tree_to_str(parse_tree_root)
         return next_cell, status, return_val, text
@@ -339,7 +367,7 @@ class XLMInterpreter:
                                                                            arguments[0],
                                                                            interactive)
             if status == EvalStatus.FullEvaluation:
-                if 0 <float(text) < 0x110000:
+                if 0 < float(text) < 0x110000:
                     text = chr(int(float(text)))
                     cell = self.get_formula_cell(current_cell.sheet, current_cell.column, current_cell.row)
                     cell.value = text
@@ -357,8 +385,8 @@ class XLMInterpreter:
             if return_val.startswith('"') and return_val.endswith('"'):
                 return_val = return_val[1:-1]
             next_cell, status_dst, return_val_dst, text_dst = self.evaluate_parse_tree(current_cell,
-                                                                           arguments[1],
-                                                                       interactive)
+                                                                                       arguments[1],
+                                                                                       interactive)
             if return_val_dst is None:
                 return_val_dst = ''
             if return_val_dst.startswith('"') and return_val_dst.endswith('"'):
@@ -377,14 +405,15 @@ class XLMInterpreter:
                                                                            arguments[0],
                                                                            interactive)
             if status == EvalStatus.FullEvaluation:
-                if type(return_val) is float  or type(return_val) is int:
+                if type(return_val) is float or type(return_val) is int:
                     return_val = True
                 else:
                     return_val = False
                 text = str(return_val)
 
         elif function_name == 'FORMULA':
-            next_cell, status, return_val, text = self.evaluate_formula(current_cell, function_name, arguments, interactive)
+            next_cell, status, return_val, text = self.evaluate_formula(current_cell, function_name, arguments,
+                                                                        interactive)
 
         elif function_name == 'CALL':
             argument_texts = []
@@ -442,8 +471,9 @@ class XLMInterpreter:
             if visited is False:
                 self._indent_level += 1
                 if size == 3:
-                    con_next_cell, con_status, con_return_val, con_text = self.evaluate_parse_tree(current_cell, arguments[0],
-                                                                                           interactive)
+                    con_next_cell, con_status, con_return_val, con_text = self.evaluate_parse_tree(current_cell,
+                                                                                                   arguments[0],
+                                                                                                   interactive)
                     if self.is_bool(con_return_val):
                         con_return_val = bool(con_return_val)
 
@@ -451,14 +481,16 @@ class XLMInterpreter:
                         if con_return_val:
                             if type(arguments[1]) is Tree or type(arguments[1]) is Token:
                                 self._branch_stack.append(
-                                    (current_cell, arguments[1], current_cell.sheet.cells, self._indent_level, '[TRUE]'))
+                                    (
+                                    current_cell, arguments[1], current_cell.sheet.cells, self._indent_level, '[TRUE]'))
                                 status = EvalStatus.Branching
                             else:
                                 status = EvalStatus.FullEvaluation
                         else:
                             if type(arguments[2]) is Tree or type(arguments[2]) is Token:
                                 self._branch_stack.append(
-                                    (current_cell, arguments[2], current_cell.sheet.cells, self._indent_level, '[FALSE]'))
+                                    (current_cell, arguments[2], current_cell.sheet.cells, self._indent_level,
+                                     '[FALSE]'))
                                 status = EvalStatus.Branching
                             else:
                                 status = EvalStatus.FullEvaluation
@@ -468,9 +500,11 @@ class XLMInterpreter:
                     else:
                         memory_state = copy.deepcopy(current_cell.sheet.cells)
                         if type(arguments[2]) is Tree or type(arguments[2]) is Token:
-                            self._branch_stack.append((current_cell, arguments[2], memory_state,self._indent_level, '[FALSE]'))
+                            self._branch_stack.append(
+                                (current_cell, arguments[2], memory_state, self._indent_level, '[FALSE]'))
                         if type(arguments[1]) is Tree or type(arguments[1]) is Token:
-                            self._branch_stack.append((current_cell, arguments[1], current_cell.sheet.cells, self._indent_level, '[TRUE]'))
+                            self._branch_stack.append(
+                                (current_cell, arguments[1], current_cell.sheet.cells, self._indent_level, '[TRUE]'))
 
                         text = self.convert_parse_tree_to_str(parse_tree_root)
 
@@ -481,7 +515,7 @@ class XLMInterpreter:
                     text = self.convert_parse_tree_to_str(parse_tree_root)
             else:
                 # loop detected
-                text = '[[LOOP]]: '+ self.convert_parse_tree_to_str(parse_tree_root)
+                text = '[[LOOP]]: ' + self.convert_parse_tree_to_str(parse_tree_root)
                 status = EvalStatus.End
 
         elif function_name == 'NOW':
@@ -503,7 +537,7 @@ class XLMInterpreter:
             text = ''
             for arg in arguments:
                 sheet_name, col, row = self.get_cell_addr(current_cell, arg)
-                cell = self.get_cell(sheet_name,col,row)
+                cell = self.get_cell(sheet_name, col, row)
                 if cell is not None:
                     text += str(cell.value.strip('"'))
             return_val = text = '"{}"'.format(text)
@@ -553,8 +587,8 @@ class XLMInterpreter:
             if cell_addr in sheet.cells:
                 cell = sheet.cells[cell_addr]
                 if cell.value is not None:
-                    if self.is_float( cell.value) is False:
-                        text = '"{}"'.format(cell.value.replace('"','""'))
+                    if self.is_float(cell.value) is False:
+                        text = '"{}"'.format(cell.value.replace('"', '""'))
                     else:
                         text = cell.value
                     status = EvalStatus.FullEvaluation
@@ -581,9 +615,9 @@ class XLMInterpreter:
                         status = EvalStatus.FullEvaluation
                         if op_str == '&':
                             if text_left.startswith('"') and text_left.endswith('"'):
-                                text_left = text_left[1:-1].replace('""','"')
+                                text_left = text_left[1:-1].replace('""', '"')
                             if text_right.startswith('"') and text_right.endswith('"'):
-                                text_right = text_right[1:-1].replace('""','"')
+                                text_right = text_right[1:-1].replace('""', '"')
 
                             text_left = text_left + text_right
                             # text_left = '"{}"'.format(text_left)
@@ -683,15 +717,14 @@ class XLMInterpreter:
                                 if return_val is not None:
                                     current_cell.value = str(return_val)
                                 if next_cell is None and \
-                                    (status == EvalStatus.FullEvaluation or \
-                                    status == EvalStatus.PartialEvaluation or
-                                    status == EvalStatus.NotImplemented):
-
+                                        (status == EvalStatus.FullEvaluation or \
+                                         status == EvalStatus.PartialEvaluation or
+                                         status == EvalStatus.NotImplemented):
                                     next_cell = self.get_formula_cell(current_cell.sheet,
                                                                       current_cell.column,
                                                                       str(int(current_cell.row) + 1))
                                 if stack_record:
-                                    text = (desc+' '+text).strip()
+                                    text = (desc + ' ' + text).strip()
 
                                 if self._indent_current_line:
                                     previous_indent = self._indent_level
@@ -745,6 +778,7 @@ _parent_dir = os.path.normpath(os.path.join(_thismodule_dir, '..'))
 if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
 
+
 def get_file_type(path):
     file_type = None
     with open(path, 'rb') as input_file:
@@ -769,7 +803,7 @@ def show_cells(excel_doc):
         uprint('auto_open: {}->{}'.format(label[0], label[1]))
     for macrosheet_name in macrosheets:
         uprint('SHEET: {}, {}'.format(macrosheets[macrosheet_name].name,
-                                        macrosheets[macrosheet_name].type))
+                                      macrosheets[macrosheet_name].type))
         for formula_loc, info in macrosheets[macrosheet_name].cells.items():
             if info.formula is not None:
                 uprint('CELL:{:10}, {:20}, {}'.format(formula_loc, info.formula, info.value))
@@ -802,7 +836,7 @@ def process_file(**kwargs):
     file_path = os.path.abspath(kwargs.get("file"))
     file_type = get_file_type(file_path)
     if file_type is None:
-        return('ERROR: input file type is not supported')
+        return ('ERROR: input file type is not supported')
 
     try:
         start = time.time()
@@ -821,7 +855,7 @@ def process_file(**kwargs):
         elif file_type == 'xlsb':
             excel_doc = XLSBWrapper(file_path)
         if excel_doc is None:
-            return("File format is not supported")
+            return ("File format is not supported")
 
         auto_open_labels = excel_doc.get_defined_name('auto_open', full_match=False)
         for label in auto_open_labels:
@@ -833,7 +867,7 @@ def process_file(**kwargs):
             interpreter = XLMInterpreter(excel_doc)
             if kwargs.get("start_with_shell"):
                 starting_points = interpreter.xlm_wrapper.get_defined_name('auto_open',
-                                                                            full_match=False)
+                                                                           full_match=False)
                 if len(starting_points) > 0:
                     sheet_name, col, row = Cell.parse_cell_addr(starting_points[0][1])
                     macros = interpreter.xlm_wrapper.get_macrosheets()
@@ -842,9 +876,11 @@ def process_file(**kwargs):
                         interpreter.interactive_shell(current_cell, "")
             for step in interpreter.deobfuscate_macro(not kwargs.get("noninteractive")):
                 if not kwargs.get("return_deobfuscated"):
-                    uprint('CELL:{:10}, {:20},{}{}'.format(step[0].get_local_address(), step[1].name, ''.join( ['\t']*step[3]), step[2]))
+                    uprint('CELL:{:10}, {:20},{}{}'.format(step[0].get_local_address(), step[1].name,
+                                                           ''.join(['\t'] * step[3]), step[2]))
                 else:
-                    deobfuscated.append('CELL:{:10}, {:20},{}{}'.format(step[0].get_local_address(), step[1].name, ''.join( ['\t']*step[3]), step[2]))
+                    deobfuscated.append('CELL:{:10}, {:20},{}{}'.format(step[0].get_local_address(), step[1].name,
+                                                                        ''.join(['\t'] * step[3]), step[2]))
         print('time elapsed: ' + str(time.time() - start))
     finally:
         if HAS_XLSWrapper and type(excel_doc) is XLSWrapper:
@@ -856,7 +892,6 @@ def process_file(**kwargs):
 
 
 def main():
-
     arg_parser = argparse.ArgumentParser()
 
     arg_parser.add_argument("-f", "--file", type=str, action='store', help="The path of a XLSM file")
@@ -873,13 +908,14 @@ def main():
 
     if not args.file or not os.path.exists(args.file):
         arg_parser.print_help()
-        return('Error: input file does not exist')
+        return ('Error: input file does not exist')
 
     try:
         # Convert args to kwarg dict
         process_file(**vars(args))
     except KeyboardInterrupt:
         pass
+
 
 if __name__ == '__main__':
     main()

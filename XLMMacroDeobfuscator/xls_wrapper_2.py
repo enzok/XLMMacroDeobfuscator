@@ -10,7 +10,7 @@ class XLSWrapper2(ExcelWrapper):
     XLEXCEL4MACROSHEET = 3
 
     def __init__(self, xls_doc_path):
-        self.xls_workbook = xlrd2.open_workbook(xls_doc_path)
+        self.xls_workbook = xlrd2.open_workbook(xls_doc_path, formatting_info=True)
         self._macrosheets = None
         self._defined_names = None
         self.xl_international_flags = {}
@@ -18,8 +18,8 @@ class XLSWrapper2(ExcelWrapper):
                                        XlApplicationInternational.xlListSeparator: ',',
                                        XlApplicationInternational.xlRightBracket: ']'}
 
-        control_chars = ''.join(map(chr, range(0,32)))
-        control_chars += ''.join(map(chr,  range(127,160)))
+        control_chars = ''.join(map(chr, range(0, 32)))
+        control_chars += ''.join(map(chr, range(127, 160)))
         control_chars += '\ufefe\uffff\ufeff\ufffe\uffef\ufff0\ufff1\ufff6\ufefd\udddd\ufffd'
         self._control_char_re = re.compile('[%s]' % re.escape(control_chars))
 
@@ -30,7 +30,7 @@ class XLSWrapper2(ExcelWrapper):
         return result
 
     def remove_nonprintable_chars(self, input_str):
-        input_str =  input_str.encode("utf-16").decode('utf-16','ignore')
+        input_str = input_str.encode("utf-16").decode('utf-16', 'ignore')
         return self._control_char_re.sub('', input_str)
 
     def get_defined_names(self):
@@ -67,7 +67,7 @@ class XLSWrapper2(ExcelWrapper):
             for xls_cell in xls_sheet.get_used_cells():
                 cell = Cell()
                 cell.sheet = macrosheet
-                if xls_cell.formula is not None and len(xls_cell.formula)>0:
+                if xls_cell.formula is not None and len(xls_cell.formula) > 0:
                     cell.formula = '=' + xls_cell.formula
                 cell.value = xls_cell.value
                 cell.row = xls_cell.row + 1
@@ -78,6 +78,20 @@ class XLSWrapper2(ExcelWrapper):
         except Exception as error:
             print('CELL(Formula): ' + str(error.args[2]))
 
+    def load_row_heights(self, macrosheet, sheet):
+        if sheet.rowinfo_map:
+            for row in sheet.rowinfo_map:
+                row_height = sheet.rowinfo_map[row].height / 20
+                macrosheet.row_heights[row] = row_height
+        else:
+            macrosheet.row_height_default = sheet.default_row_height / 20
+
+    def load_wb_attributes(self, macrosheet, sheet, wb):
+        macrosheet.font_list = wb.font_list
+        macrosheet.xf_list = wb.xf_list
+        macrosheet.colour_indexes_used = wb.colour_indexes_used
+        macrosheet.colour_map = wb.colour_map
+        macrosheet.cell_xf_index = sheet.cell_xf_index
 
     def get_macrosheets(self):
         if self._macrosheets is None:
@@ -86,6 +100,8 @@ class XLSWrapper2(ExcelWrapper):
                 if sheet.boundsheet_type == xlrd2.biffh.XL_MACROSHEET:
                     macrosheet = Boundsheet(sheet.name, 'Macrosheet')
                     self.load_cells(macrosheet, sheet)
+                    self.load_row_heights(macrosheet, sheet)
+                    self.load_wb_attributes(macrosheet, sheet, self.xls_workbook)
                     self._macrosheets[sheet.name] = macrosheet
 
         return self._macrosheets
@@ -114,4 +130,3 @@ if __name__ == '__main__':
         for formula_loc, info in macrosheets[macrosheet_name].cells.items():
             if info.formula is None:
                 print('{}\t{}\t{}'.format(formula_loc, info.formula, info.value))
-

@@ -27,19 +27,14 @@ class Cell:
         return self.column + str(self.row)
 
     def __str__(self):
-        return "'{}'!{}".format(self.sheet.name,self.get_local_address())
+        return "'{}'!{}".format(self.sheet.name, self.get_local_address())
 
     @staticmethod
     def convert_to_column_index(s):
-        number = 0
-        power = 1
-        for character in s:
-            character = character.upper()
-            digit = (ord(character) - ord('A')) * power
-            number = number + digit
-            power = power * 26
-
-        return number + 1
+        n = 0
+        for c in s:
+            n = n * 26 + 1 + ord(c) - ord('A')
+        return n
 
     @staticmethod
     def convert_to_column_name(n):
@@ -67,6 +62,11 @@ class Boundsheet:
         self.cells = {}
         self.row_heights = {}
         self.row_height_default = 15
+        self.font_list = []
+        self.xf_list = []
+        self.colour_indexes_used = {}
+        self.colour_map = {}
+        self.cell_xf_index = None
 
     def add_cell(self, cell):
         cell.sheet = self
